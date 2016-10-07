@@ -11,12 +11,14 @@ import (
     "io/ioutil"
     "errors"
     "os"
+    "bytes"
 )
 
 
 // MEMORY_URL="http://claudio-mg.notainteligente.dev:3000/memory_integration"
 // MEMORY_DB_ADAPTER="mysql"
 // MEMORY_DB_URL="root:@/issintel_3_vicosa"
+// MEMORY_TOKEN="123456-dev-token"
 
 func GetFirebirdAccessInfo() (string, string) {
     // user:password@servername[:port_number]/database_name_or_file (user:password@servername/foo/bar.fdb)
@@ -24,16 +26,31 @@ func GetFirebirdAccessInfo() (string, string) {
     return os.Getenv("MEMORY_DB_ADAPTER"), os.Getenv("MEMORY_DB_URL")
 }
 
+// returns something like {"token":"123456-dev-token"} to be sent on requests as identification/authentication
+func GetTokenAsJson() string {
+    jsonData, _ := json.Marshal(struct{Token string `json:"token"`}{Token: os.Getenv("MEMORY_TOKEN")})
+    return string(jsonData)
+}
 
 func GetSql() ([]map[string]string, error)  {
   url := os.Getenv("MEMORY_URL")
   m   := []map[string]string{}
 
-  resp, err := http.Get(url)
+
+  var jsonToken = []byte(GetTokenAsJson())
+  req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonToken))
+  // req.Header.Set("X-Custom-Header", "myvalue")
+  req.Header.Set("Content-Type", "application/json")
+
+  client := &http.Client{}
+  resp, err := client.Do(req)
   if err != nil {
-    return m, err
+      return m, err
   }
   defer resp.Body.Close()
+
+  // fmt.Println("response Status:", resp.Status)
+  // fmt.Println("response Headers:", resp.Header)
   body, err := ioutil.ReadAll(resp.Body)
   if err != nil {
     return m, err
@@ -140,7 +157,7 @@ func RunSqlQuery(query_sql string) (string, error) {
 }
 
 func Feedback(err error) {
-  log.Fatal(err)
+  log.Println(err)
   // os.Exit(0)
 }
 
