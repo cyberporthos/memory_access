@@ -12,6 +12,7 @@ import (
     "errors"
     "os"
     "bytes"
+    "strconv"
 )
 
 
@@ -21,13 +22,18 @@ import (
 // MEMORY_TOKEN="123456-dev-token"
 
 var timer_seconds int = 10
+var change_timer_chan chan int = make(chan int, 1)
 
-func GetTimerSeconds() int {
-    return timer_seconds
+func GetTimerSeconds() (int, chan int) {
+    return timer_seconds, change_timer_chan
 }
 
 func SetTimerSeconds(new_value int) {
+    time_changed := (timer_seconds != new_value)
     timer_seconds = new_value
+    if time_changed {
+        change_timer_chan <- timer_seconds
+    }
 }
 
 func GetFirebirdAccessInfo() (string, string) {
@@ -177,19 +183,28 @@ func Run() {
       Feedback(err)
     }
 
+    change_timer_interval := 0
+
     for _, query_sql_result := range query_sql_results {
-      query_sql, ok := query_sql_result["sql"]
-      if ok == false {
+      interval, has_interval := query_sql_result["set_interval"]
+      if has_interval {
+        change_timer_interval, err = strconv.Atoi(interval)
+        if (err != nil) {
+          change_timer_interval = 0
+        }
+      }
+      query_sql, has_sql := query_sql_result["sql"]
+      if has_sql == false {
         Feedback(errors.New("sql key not found"))
       }
-      type_sql, ok := query_sql_result["type"]
-      if ok == false {
+      type_sql, has_type := query_sql_result["type"]
+      if has_type == false {
         Feedback(errors.New("type key not found"))
       }
       var query_result string
-      if type_sql == "query" {
+      if has_sql && has_type && type_sql == "query" {
         query_result, err = RunSqlQuery(query_sql)
-      } else if type_sql == "exec" {
+      } else if has_sql && has_type && type_sql == "exec" {
         query_result, err = RunSqlExec(query_sql)
       } else {
         Feedback(errors.New(fmt.Sprintf("type not recognized: %s", type_sql)))
@@ -198,5 +213,8 @@ func Run() {
         Feedback(err)
       }
       fmt.Println(query_result)
+    }
+    if change_timer_interval > 0 {
+      SetTimerSeconds(change_timer_interval)
     }
 }
