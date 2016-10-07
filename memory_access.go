@@ -20,6 +20,16 @@ import (
 // MEMORY_DB_URL="root:@/issintel_3_vicosa"
 // MEMORY_TOKEN="123456-dev-token"
 
+var timer_seconds int = 10
+
+func GetTimerSeconds() int {
+    return timer_seconds
+}
+
+func SetTimerSeconds(new_value int) {
+    timer_seconds = new_value
+}
+
 func GetFirebirdAccessInfo() (string, string) {
     // user:password@servername[:port_number]/database_name_or_file (user:password@servername/foo/bar.fdb)
     // return "firebirdsql", "user:password@servername[:port_number]/database_name_or_file", nil
