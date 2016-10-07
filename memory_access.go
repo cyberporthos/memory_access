@@ -9,7 +9,6 @@ import (
     "encoding/json"
     "net/http"
     "io/ioutil"
-    "errors"
     "os"
     "bytes"
     "strconv"
@@ -44,8 +43,12 @@ func GetFirebirdAccessInfo() (string, string) {
 
 // returns something like {"token":"123456-dev-token"} to be sent on requests as identification/authentication
 func GetTokenAsJson() string {
-    jsonData, _ := json.Marshal(struct{Token string `json:"token"`}{Token: os.Getenv("MEMORY_TOKEN")})
+    jsonData, _ := json.Marshal(struct{Token string `json:"token"`}{Token: GetToken()})
     return string(jsonData)
+}
+
+func GetToken() string {
+  return os.Getenv("MEMORY_TOKEN")
 }
 
 func GetSql() ([]map[string]string, error)  {
@@ -54,6 +57,7 @@ func GetSql() ([]map[string]string, error)  {
 
 
   var jsonToken = []byte(GetTokenAsJson())
+  fmt.Println(GetTokenAsJson())
   req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonToken))
   // req.Header.Set("X-Custom-Header", "myvalue")
   req.Header.Set("Content-Type", "application/json")
@@ -81,6 +85,8 @@ func GetSql() ([]map[string]string, error)  {
 }
 
 type ResultWrapper struct {
+  Token string `json:"token"`
+  QueryId uint64 `json:"query_id"`
   Results []interface{} `json:"results"`
 }
 
@@ -89,7 +95,7 @@ type RunSqlQueryResult struct {
     RowsAffected  uint64 `json:"rows_affected"`
 }
 
-func RunSqlExec(query_sql string) (string, error) {
+func RunSqlExec(query_sql string, query_id uint64) (string, error) {
     db_driver, access_info  := GetFirebirdAccessInfo()
 
     conn, err := sql.Open(db_driver, access_info)
@@ -111,13 +117,17 @@ func RunSqlExec(query_sql string) (string, error) {
     exec_result.RowsAffected = uint64(rows_affected)
 
 
-    wrapper := ResultWrapper{Results: []interface{}{exec_result}}
+    wrapper := ResultWrapper{
+      Token: GetToken(),
+      QueryId: query_id,
+      Results: []interface{}{exec_result},
+    }
 
     jsonData, err := json.Marshal(wrapper)
     return string(jsonData), err
 }
 
-func RunSqlQuery(query_sql string) (string, error) {
+func RunSqlQuery(query_sql string, query_id uint64) (string, error) {
     db_driver, access_info := GetFirebirdAccessInfo()
 
     conn, err := sql.Open(db_driver, access_info)
@@ -163,7 +173,11 @@ func RunSqlQuery(query_sql string) (string, error) {
         tableData = append(tableData, entry)
     }
 
-    wrapper := ResultWrapper{Results: tableData}
+    wrapper := ResultWrapper{
+      Token: GetToken(),
+      QueryId: query_id,
+      Results: tableData,
+    }
 
     jsonData, err := json.Marshal(wrapper)
     if err != nil {
@@ -177,44 +191,70 @@ func Feedback(err error) {
   // os.Exit(0)
 }
 
-func Run() {
-    query_sql_results, err := GetSql()
-    if err != nil {
-      Feedback(err)
-    }
+func GetQueryId(query_sql_result map[string]string) uint64 {
+    var query_id uint64
 
+    query_id_str, has_query_id := query_sql_result["id"]
+    if has_query_id == false {
+        query_id = 0
+        // Feedback(errors.New("has_query_id key not found"))
+    } else {
+        query_id_int, err := strconv.Atoi(query_id_str)
+        if (err != nil) {
+          query_id = 0
+        } else {
+          query_id = uint64(query_id_int)
+        }
+    }
+    return query_id
+}
+
+
+func RunInstruction(query_sql_results []map[string]string) {
     change_timer_interval := 0
+    var err error
 
     for _, query_sql_result := range query_sql_results {
       interval, has_interval := query_sql_result["set_interval"]
       if has_interval {
-        change_timer_interval, err = strconv.Atoi(interval)
-        if (err != nil) {
-          change_timer_interval = 0
-        }
+          change_timer_interval, err = strconv.Atoi(interval)
+          if (err != nil) {
+              change_timer_interval = 0
+          }
       }
       query_sql, has_sql := query_sql_result["sql"]
-      if has_sql == false {
-        Feedback(errors.New("sql key not found"))
-      }
+      // if has_sql == false {
+      //     Feedback(errors.New("sql key not found"))
+      // }
+      query_id := GetQueryId(query_sql_result)
       type_sql, has_type := query_sql_result["type"]
-      if has_type == false {
-        Feedback(errors.New("type key not found"))
-      }
+      // if has_type == false {
+      //     Feedback(errors.New("type key not found"))
+      // }
       var query_result string
       if has_sql && has_type && type_sql == "query" {
-        query_result, err = RunSqlQuery(query_sql)
+          query_result, err = RunSqlQuery(query_sql, query_id)
       } else if has_sql && has_type && type_sql == "exec" {
-        query_result, err = RunSqlExec(query_sql)
-      } else {
-        Feedback(errors.New(fmt.Sprintf("type not recognized: %s", type_sql)))
+          query_result, err = RunSqlExec(query_sql, query_id)
       }
       if err != nil {
-        Feedback(err)
+          Feedback(err)
       }
-      fmt.Println(query_result)
+      if has_sql && has_type && query_result != "" {
+          fmt.Println(query_result)
+      }
     }
     if change_timer_interval > 0 {
       SetTimerSeconds(change_timer_interval)
     }
+}
+
+func Run() {
+    query_sql_results, err := GetSql()
+    if err != nil {
+      Feedback(err)
+    } else {
+      RunInstruction(query_sql_results)
+    }
+
 }
