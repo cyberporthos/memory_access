@@ -1,28 +1,32 @@
-package main
+package memory_access
 
 import (
     "fmt"
     "database/sql"
     _ "github.com/go-sql-driver/mysql"
+    _ "github.com/nakagami/firebirdsql"
     "log"
     "encoding/json"
     "net/http"
     "io/ioutil"
     "errors"
+    "os"
 )
 
-//    _ "github.com/nakagami/firebirdsql"
 
-func getFirebirdAccessInfo() (string, string, error) {
-    // return -1, errors.New("can't work with 42")
+// MEMORY_URL="http://claudio-mg.notainteligente.dev:3000/memory_integration"
+// MEMORY_DB_ADAPTER="mysql"
+// MEMORY_DB_URL="root:@/issintel_3_vicosa"
+
+func GetFirebirdAccessInfo() (string, string) {
     // user:password@servername[:port_number]/database_name_or_file (user:password@servername/foo/bar.fdb)
     // return "firebirdsql", "user:password@servername[:port_number]/database_name_or_file", nil
-    return "mysql", "root:@/issintel_3_vicosa", nil
+    return os.Getenv("MEMORY_DB_ADAPTER"), os.Getenv("MEMORY_DB_URL")
 }
 
 
-func getSql() ([]map[string]string, error)  {
-  url := "http://claudio-mg.notainteligente.dev:3000/memory_integration"
+func GetSql() ([]map[string]string, error)  {
+  url := os.Getenv("MEMORY_URL")
   m   := []map[string]string{}
 
   resp, err := http.Get(url)
@@ -52,11 +56,8 @@ type RunSqlQueryResult struct {
     RowsAffected  uint64 `json:"rows_affected"`
 }
 
-func runSqlExec(query_sql string) (string, error) {
-    db_driver, access_info, err  := getFirebirdAccessInfo()
-    if err != nil {
-        return "", err
-    }
+func RunSqlExec(query_sql string) (string, error) {
+    db_driver, access_info  := GetFirebirdAccessInfo()
 
     conn, err := sql.Open(db_driver, access_info)
 
@@ -83,11 +84,8 @@ func runSqlExec(query_sql string) (string, error) {
     return string(jsonData), err
 }
 
-func runSqlQuery(query_sql string) (string, error) {
-    db_driver, access_info, err  := getFirebirdAccessInfo()
-    if err != nil {
-        return "", err
-    }
+func RunSqlQuery(query_sql string) (string, error) {
+    db_driver, access_info := GetFirebirdAccessInfo()
 
     conn, err := sql.Open(db_driver, access_info)
 
@@ -134,9 +132,6 @@ func runSqlQuery(query_sql string) (string, error) {
 
     wrapper := ResultWrapper{Results: tableData}
 
-    // wrapper := make(map[string]interface{})
-    // wrapper["results"] = tableData
-
     jsonData, err := json.Marshal(wrapper)
     if err != nil {
         return "", err
@@ -149,9 +144,8 @@ func Feedback(err error) {
   // os.Exit(0)
 }
 
-func main() {
-
-    query_sql_results, err := getSql()
+func Run() {
+    query_sql_results, err := GetSql()
     if err != nil {
       Feedback(err)
     }
@@ -167,9 +161,9 @@ func main() {
       }
       var query_result string
       if type_sql == "query" {
-        query_result, err = runSqlQuery(query_sql)
+        query_result, err = RunSqlQuery(query_sql)
       } else if type_sql == "exec" {
-        query_result, err = runSqlExec(query_sql)
+        query_result, err = RunSqlExec(query_sql)
       } else {
         Feedback(errors.New(fmt.Sprintf("type not recognized: %s", type_sql)))
       }
