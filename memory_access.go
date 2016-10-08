@@ -51,14 +51,13 @@ func GetToken() string {
   return os.Getenv("MEMORY_TOKEN")
 }
 
-func GetSql() ([]map[string]string, error)  {
+func GetInstructions(post_data_as_json string) ([]map[string]string, error)  {
   url := os.Getenv("MEMORY_URL")
   m   := []map[string]string{}
 
+  fmt.Println(post_data_as_json)
 
-  var jsonToken = []byte(GetTokenAsJson())
-  fmt.Println(GetTokenAsJson())
-  req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonToken))
+  req, err := http.NewRequest("POST", url, bytes.NewBuffer([]byte(post_data_as_json)))
   // req.Header.Set("X-Custom-Header", "myvalue")
   req.Header.Set("Content-Type", "application/json")
 
@@ -209,10 +208,18 @@ func GetQueryId(query_sql_result map[string]string) uint64 {
     return query_id
 }
 
+func GetEmptyQueryResult(query_id uint64) string {
+    empty_array := make([]interface{}, 0)
 
-func RunInstruction(query_sql_results []map[string]string) {
+    result_wrapper := ResultWrapper{ Token: GetToken(), QueryId: query_id, Results: empty_array }
+    empty_query_result, _ := json.Marshal(result_wrapper)
+    return string(empty_query_result)
+}
+
+func RunInstruction(query_sql_results []map[string]string) []string {
     change_timer_interval := 0
     var err error
+    var query_results []string
 
     for _, query_sql_result := range query_sql_results {
       interval, has_interval := query_sql_result["set_interval"]
@@ -241,20 +248,33 @@ func RunInstruction(query_sql_results []map[string]string) {
           Feedback(err)
       }
       if has_sql && has_type && query_result != "" {
-          fmt.Println(query_result)
+        query_results = append(query_results, query_result)
+      } else if query_id > 0 {
+        query_results = append(query_results, GetEmptyQueryResult(query_id))
       }
     }
     if change_timer_interval > 0 {
       SetTimerSeconds(change_timer_interval)
     }
+
+    return query_results
 }
 
-func Run() {
-    query_sql_results, err := GetSql()
+func RunWith(post_data string) {
+    query_sql_results, err := GetInstructions(post_data)
     if err != nil {
       Feedback(err)
     } else {
-      RunInstruction(query_sql_results)
+      query_results := RunInstruction(query_sql_results)
+      for _, query_result := range query_results {
+        RunWith(query_result)
+      }
+      if (len(query_results) > 0) {
+        RunWith(GetTokenAsJson())
+      }
     }
+}
 
+func Run() {
+    RunWith(GetTokenAsJson())
 }
