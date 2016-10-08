@@ -21,6 +21,7 @@ import (
 // MEMORY_TOKEN="123456-dev-token"
 
 var timer_seconds int = 10
+var not_running bool = true
 var change_timer_chan chan int = make(chan int, 1)
 
 func GetTimerSeconds() (int, chan int) {
@@ -269,12 +270,23 @@ func RunWith(post_data string) {
       for _, query_result := range query_results {
         RunWith(query_result)
       }
+      // when we are posting results, the server returns no instructions
+      // so the if below ensures that it only runs when we have received instructions, evaluated all
+      // of them and sent theirs results, so we immediately ask for new instructions
       if (len(query_results) > 0) {
         RunWith(GetTokenAsJson())
       }
     }
 }
 
+func NotRunning() bool {
+  return not_running
+}
+
 func Run() {
-    RunWith(GetTokenAsJson())
+    if NotRunning() {
+        not_running = false
+        RunWith(GetTokenAsJson())
+        not_running = true
+    }
 }
