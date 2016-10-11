@@ -20,8 +20,9 @@ import (
 // MEMORY_DB_URL="root:@/issintel_3_vicosa"
 // MEMORY_TOKEN="123456-dev-token"
 
-var timer_seconds int = 10
-var not_running bool = true
+var timer_seconds  int = 10
+var not_running   bool = true
+var feedback_mode bool = true
 var change_timer_chan chan int = make(chan int, 1)
 
 func GetTimerSeconds() (int, chan int) {
@@ -56,7 +57,9 @@ func GetInstructions(post_data_as_json string) ([]map[string]string, error)  {
   url := os.Getenv("MEMORY_URL")
   m   := []map[string]string{}
 
-  fmt.Println(post_data_as_json)
+  if feedback_mode {
+    fmt.Println(post_data_as_json)
+  }
 
   req, err := http.NewRequest("POST", url, bytes.NewBuffer([]byte(post_data_as_json)))
   // req.Header.Set("X-Custom-Header", "myvalue")
@@ -191,7 +194,9 @@ func RunSqlQuery(query_sql string, query_id uint64) (string, error) {
 }
 
 func Feedback(err error) {
-  log.Println(err)
+  if feedback_mode {
+    log.Println(err)
+  }
   // os.Exit(0)
 }
 
@@ -308,4 +313,7 @@ func Run() {
         RunWith(GetTokenAsJson())
         not_running = true
     }
+}
+func SetNoFeedback() {
+  feedback_mode = false
 }
