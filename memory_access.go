@@ -95,6 +95,10 @@ type RunSqlQueryResult struct {
     RowsAffected  uint64 `json:"rows_affected"`
 }
 
+type RunSqlErrorResult struct {
+    Error string `json:"error"`
+}
+
 func RunSqlExec(query_sql string, query_id uint64) (string, error) {
     db_driver, access_info  := GetFirebirdAccessInfo()
 
@@ -217,17 +221,30 @@ func GetEmptyQueryResult(query_id uint64) string {
     return string(empty_query_result)
 }
 
+func GetErrorQueryResult(query_id uint64, e error) string {
+    error_result := RunSqlErrorResult{}
+    error_result.Error = e.Error()
+
+    error_array := []interface{}{error_result}
+
+    result_wrapper         := ResultWrapper{ Token: GetToken(), QueryId: query_id, Results: error_array }
+    result_wrapper_json, _ := json.Marshal(result_wrapper)
+    return string(result_wrapper_json)
+}
+
 func RunInstruction(query_sql_results []map[string]string) []string {
-    change_timer_interval := 0
+    var change_timer_interval int = 0
     var err error
     var query_results []string
 
     for _, query_sql_result := range query_sql_results {
       interval, has_interval := query_sql_result["set_interval"]
       if has_interval {
-          change_timer_interval, err = strconv.Atoi(interval)
-          if (err != nil) {
+          converted_int, convert_err := strconv.Atoi(interval)
+          if (convert_err != nil) {
               change_timer_interval = 0
+          } else {
+            change_timer_interval   = converted_int
           }
       }
       query_sql, has_sql := query_sql_result["sql"]
@@ -245,15 +262,17 @@ func RunInstruction(query_sql_results []map[string]string) []string {
       } else if has_sql && has_type && type_sql == "exec" {
           query_result, err = RunSqlExec(query_sql, query_id)
       }
-      if err != nil {
-          Feedback(err)
-      }
       if has_sql && has_type && query_result != "" {
         query_results = append(query_results, query_result)
       } else if query_id > 0 {
-        query_results = append(query_results, GetEmptyQueryResult(query_id))
+        if err != nil {
+          query_results = append(query_results, GetErrorQueryResult(query_id, err))
+        } else {
+          query_results = append(query_results, GetEmptyQueryResult(query_id))
+        }
       }
     }
+
     if change_timer_interval > 0 {
       SetTimerSeconds(change_timer_interval)
     }
