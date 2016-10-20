@@ -12,13 +12,11 @@ import (
     "os"
     "bytes"
     "strconv"
+    "golang.org/x/text/encoding"
+    "golang.org/x/text/encoding/charmap"
+    "strings"
 )
 
-
-// MEMORY_URL="http://claudio-mg.notainteligente.dev:3000/memory_integration"
-// MEMORY_DB_ADAPTER="mysql"
-// MEMORY_DB_URL="root:@/issintel_3_vicosa"
-// MEMORY_TOKEN="123456-dev-token"
 
 var timer_seconds  int = 10
 var not_running   bool = true
@@ -38,7 +36,6 @@ func SetTimerSeconds(new_value int) {
 }
 
 func GetFirebirdAccessInfo() (string, string) {
-    // user:password@servername[:port_number]/database_name_or_file (user:password@servername/foo/bar.fdb)
     // return "firebirdsql", "user:password@servername[:port_number]/database_name_or_file", nil
     return os.Getenv("MEMORY_DB_ADAPTER"), os.Getenv("MEMORY_DB_URL")
 }
@@ -62,7 +59,6 @@ func GetInstructions(post_data_as_json string) ([]map[string]string, error)  {
   }
 
   req, err := http.NewRequest("POST", url, bytes.NewBuffer([]byte(post_data_as_json)))
-  // req.Header.Set("X-Custom-Header", "myvalue")
   req.Header.Set("Content-Type", "application/json")
 
   client := &http.Client{}
@@ -72,8 +68,6 @@ func GetInstructions(post_data_as_json string) ([]map[string]string, error)  {
   }
   defer resp.Body.Close()
 
-  // fmt.Println("response Status:", resp.Status)
-  // fmt.Println("response Headers:", resp.Header)
   body, err := ioutil.ReadAll(resp.Body)
   if err != nil {
     return m, err
@@ -134,6 +128,55 @@ func RunSqlExec(query_sql string, query_id uint64) (string, error) {
     return string(jsonData), err
 }
 
+func ClientCharset() string {
+    return os.Getenv("MEMORY_CLIENT_CHARSET")
+}
+
+func ChartMap() encoding.Encoding {
+    switch ClientCharset() {
+    default:
+        return nil
+    case "ISO8859_1":
+        return charmap.ISO8859_1
+    case "ISO8859_2":
+        return charmap.ISO8859_2
+    case "Windows1250":
+        return charmap.Windows1250
+    case "Windows1252":
+        return charmap.Windows1252
+    }
+}
+
+func ConvertFromCharsetIfRequired(non_utf_str string) string {
+    if ClientCharset() == "" {
+        return non_utf_str
+    }
+
+    non_utf_str_reader := strings.NewReader(non_utf_str)
+    decoder_reader     := ChartMap().NewDecoder().Reader(non_utf_str_reader)
+
+    result, err := ioutil.ReadAll(decoder_reader)
+    if err != nil {
+        Feedback(err)
+        return non_utf_str
+    }
+
+    return fmt.Sprintf("%s", result)
+}
+
+func ConvertToCharsetIfRequired(utf_str string) string {
+    if ClientCharset() == "" {
+        return utf_str
+    }
+
+    utf_str_writer_buffer := new(bytes.Buffer)
+    encoder_writer        := ChartMap().NewEncoder().Writer(utf_str_writer_buffer)
+
+    fmt.Fprintf(encoder_writer, utf_str)
+
+    return fmt.Sprintf("%s", utf_str_writer_buffer.Bytes())
+}
+
 func RunSqlQuery(query_sql string, query_id uint64) (string, error) {
     db_driver, access_info := GetFirebirdAccessInfo()
 
@@ -144,7 +187,9 @@ func RunSqlQuery(query_sql string, query_id uint64) (string, error) {
     }
     defer conn.Close()
 
-    rows, err := conn.Query(query_sql)
+    query_sql_converted := ConvertToCharsetIfRequired(query_sql)
+
+    rows, err := conn.Query(query_sql_converted)
     if err != nil {
         return "", err
     }
@@ -167,15 +212,16 @@ func RunSqlQuery(query_sql string, query_id uint64) (string, error) {
         rows.Scan(valuePtrs...)
         entry := make(map[string]interface{})
         for i, col := range columns {
+            col_converted := ConvertFromCharsetIfRequired(string(col))
             var v interface{}
             val := values[i]
             b, ok := val.([]byte)
             if ok {
-                v = string(b)
+                v = ConvertFromCharsetIfRequired(string(b))
             } else {
                 v = val
             }
-            entry[col] = v
+            entry[col_converted] = v
         }
         tableData = append(tableData, entry)
     }
@@ -253,14 +299,8 @@ func RunInstruction(query_sql_results []map[string]string) []string {
           }
       }
       query_sql, has_sql := query_sql_result["sql"]
-      // if has_sql == false {
-      //     Feedback(errors.New("sql key not found"))
-      // }
       query_id := GetQueryId(query_sql_result)
       type_sql, has_type := query_sql_result["type"]
-      // if has_type == false {
-      //     Feedback(errors.New("type key not found"))
-      // }
       var query_result string
       if has_sql && has_type && type_sql == "query" {
           query_result, err = RunSqlQuery(query_sql, query_id)
