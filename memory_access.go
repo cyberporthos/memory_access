@@ -14,7 +14,6 @@ import (
     "strconv"
     "golang.org/x/text/encoding"
     "golang.org/x/text/encoding/charmap"
-    "strings"
 )
 
 
@@ -129,7 +128,7 @@ func RunSqlExec(query_sql string, query_id uint64) (string, error) {
 }
 
 func ClientCharset() string {
-    return os.Getenv("MEMORY_CLIENT_CHARSET")
+    return os.Getenv("FB_CLIENT_CHARSET")
 }
 
 func ChartMap() encoding.Encoding {
@@ -221,23 +220,6 @@ func ChartMap() encoding.Encoding {
     }
 }
 
-func ConvertFromCharsetIfRequired(non_utf_str string) string {
-    if ClientCharset() == "" {
-        return non_utf_str
-    }
-
-    non_utf_str_reader := strings.NewReader(non_utf_str)
-    decoder_reader     := ChartMap().NewDecoder().Reader(non_utf_str_reader)
-
-    result, err := ioutil.ReadAll(decoder_reader)
-    if err != nil {
-        Feedback(err)
-        return non_utf_str
-    }
-
-    return fmt.Sprintf("%s", result)
-}
-
 func ConvertToCharsetIfRequired(utf_str string) string {
     if ClientCharset() == "" {
         return utf_str
@@ -286,16 +268,15 @@ func RunSqlQuery(query_sql string, query_id uint64) (string, error) {
         rows.Scan(valuePtrs...)
         entry := make(map[string]interface{})
         for i, col := range columns {
-            col_converted := ConvertFromCharsetIfRequired(string(col))
             var v interface{}
             val := values[i]
             b, ok := val.([]byte)
             if ok {
-                v = ConvertFromCharsetIfRequired(string(b))
+                v = string(b)
             } else {
                 v = val
             }
-            entry[col_converted] = v
+            entry[col] = v
         }
         tableData = append(tableData, entry)
     }
