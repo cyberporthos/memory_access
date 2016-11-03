@@ -5,6 +5,7 @@ import (
     "database/sql"
     _ "github.com/go-sql-driver/mysql"
     _ "github.com/cyberporthos/firebirdsql"
+    "github.com/cyberporthos/charset"
     "log"
     "encoding/json"
     "net/http"
@@ -12,8 +13,6 @@ import (
     "os"
     "bytes"
     "strconv"
-    "golang.org/x/text/encoding"
-    "golang.org/x/text/encoding/charmap"
 )
 
 
@@ -95,16 +94,7 @@ type RunSqlErrorResult struct {
     Error string `json:"error"`
 }
 
-func RunSqlExec(query_sql string, query_id uint64) (string, error) {
-    db_driver, access_info  := GetFirebirdAccessInfo()
-
-    conn, err := sql.Open(db_driver, access_info)
-
-    if err != nil {
-        return "", err
-    }
-    defer conn.Close()
-
+func RunSqlExec(query_sql string, query_id uint64, conn *sql.DB) (string, error) {
     query_result, err := conn.Exec(query_sql)
     if err != nil {
         return "", err
@@ -131,118 +121,14 @@ func ClientCharset() string {
     return os.Getenv("FB_CLIENT_CHARSET")
 }
 
-func ChartMap() encoding.Encoding {
-    switch ClientCharset() {
-    default:
-        return nil
-    case "CodePage437":
-        return charmap.CodePage437
-    case "CodePage850":
-        return charmap.CodePage850
-    case "CodePage852":
-        return charmap.CodePage852
-    case "CodePage855":
-        return charmap.CodePage855
-    case "CodePage858":
-        return charmap.CodePage858
-    case "CodePage860":
-        return charmap.CodePage860
-    case "CodePage862":
-        return charmap.CodePage862
-    case "CodePage863":
-        return charmap.CodePage863
-    case "CodePage865":
-        return charmap.CodePage865
-    case "CodePage866":
-        return charmap.CodePage866
-    case "ISO8859_1":
-        return charmap.ISO8859_1
-    case "ISO8859_2":
-        return charmap.ISO8859_2
-    case "ISO8859_3":
-        return charmap.ISO8859_3
-    case "ISO8859_4":
-        return charmap.ISO8859_4
-    case "ISO8859_5":
-        return charmap.ISO8859_5
-    case "ISO8859_6":
-        return charmap.ISO8859_6
-    case "ISO8859_6E":
-        return charmap.ISO8859_6E
-    case "ISO8859_6I":
-        return charmap.ISO8859_6I
-    case "ISO8859_7":
-        return charmap.ISO8859_7
-    case "ISO8859_8":
-        return charmap.ISO8859_8
-    case "ISO8859_8E":
-        return charmap.ISO8859_8E
-    case "ISO8859_8I":
-        return charmap.ISO8859_8I
-    case "ISO8859_10":
-        return charmap.ISO8859_10
-    case "ISO8859_13":
-        return charmap.ISO8859_13
-    case "ISO8859_14":
-        return charmap.ISO8859_14
-    case "ISO8859_15":
-        return charmap.ISO8859_15
-    case "ISO8859_16":
-        return charmap.ISO8859_16
-    case "KOI8R":
-        return charmap.KOI8R
-    case "KOI8U":
-        return charmap.KOI8U
-    case "Macintosh":
-        return charmap.Macintosh
-    case "MacintoshCyrillic":
-        return charmap.MacintoshCyrillic
-    case "Windows874":
-        return charmap.Windows874
-    case "Windows1250":
-        return charmap.Windows1250
-    case "Windows1251":
-        return charmap.Windows1251
-    case "Windows1252":
-        return charmap.Windows1252
-    case "Windows1253":
-        return charmap.Windows1253
-    case "Windows1254":
-        return charmap.Windows1254
-    case "Windows1255":
-        return charmap.Windows1255
-    case "Windows1256":
-        return charmap.Windows1256
-    case "Windows1257":
-        return charmap.Windows1257
-    case "Windows1258":
-        return charmap.Windows1258
-    }
-}
-
 func ConvertToCharsetIfRequired(utf_str string) string {
     if ClientCharset() == "" {
         return utf_str
     }
-
-    utf_str_writer_buffer := new(bytes.Buffer)
-    encoder_writer        := ChartMap().NewEncoder().Writer(utf_str_writer_buffer)
-
-    fmt.Fprintf(encoder_writer, utf_str)
-
-    return fmt.Sprintf("%s", utf_str_writer_buffer.Bytes())
+    return charset.ConvertToCharset(ClientCharset(), utf_str)
 }
 
-func RunSqlQuery(query_sql string, query_id uint64) (string, error) {
-    db_driver, access_info := GetFirebirdAccessInfo()
-
-    conn, err := sql.Open(db_driver, access_info)
-
-    if err != nil {
-        return "", err
-    }
-    defer conn.Close()
-
+func RunSqlQuery(query_sql string, query_id uint64, conn *sql.DB) (string, error) {
     query_sql_converted := ConvertToCharsetIfRequired(query_sql)
 
     rows, err := conn.Query(query_sql_converted)
@@ -338,10 +224,19 @@ func GetErrorQueryResult(query_id uint64, e error) string {
     return string(result_wrapper_json)
 }
 
+func OpenConnection() (*sql.DB, error)  {
+    db_driver, access_info  := GetFirebirdAccessInfo()
+
+    return sql.Open(db_driver, access_info)
+}
+
 func RunInstruction(query_sql_results []map[string]string) []string {
     var change_timer_interval int = 0
     var err error
     var query_results []string
+
+    conn, err := OpenConnection()
+    defer conn.Close()
 
     for _, query_sql_result := range query_sql_results {
       interval, has_interval := query_sql_result["set_interval"]
@@ -356,17 +251,19 @@ func RunInstruction(query_sql_results []map[string]string) []string {
       query_sql, has_sql := query_sql_result["sql"]
       query_id := GetQueryId(query_sql_result)
       type_sql, has_type := query_sql_result["type"]
-      var query_result string
-      if has_sql && has_type && type_sql == "query" {
-          query_result, err = RunSqlQuery(query_sql, query_id)
-      } else if has_sql && has_type && type_sql == "exec" {
-          query_result, err = RunSqlExec(query_sql, query_id)
+      query_result := ""
+
+      if err == nil && has_sql && has_type && type_sql == "query" {
+          query_result, err = RunSqlQuery(query_sql, query_id, conn)
+      } else if err == nil && has_sql && has_type && type_sql == "exec" {
+          query_result, err = RunSqlExec(query_sql, query_id, conn)
       }
-      if has_sql && has_type && query_result != "" {
+      if err == nil && has_sql && has_type && query_result != "" {
         query_results = append(query_results, query_result)
       } else if query_id > 0 {
         if err != nil {
           query_results = append(query_results, GetErrorQueryResult(query_id, err))
+          err = nil
         } else {
           query_results = append(query_results, GetEmptyQueryResult(query_id))
         }
