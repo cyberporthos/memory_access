@@ -236,7 +236,6 @@ func RunInstruction(query_sql_results []map[string]string) []string {
     var query_results []string
 
     conn, err := OpenConnection()
-    defer conn.Close()
 
     for _, query_sql_result := range query_sql_results {
       interval, has_interval := query_sql_result["set_interval"]
@@ -263,7 +262,8 @@ func RunInstruction(query_sql_results []map[string]string) []string {
       } else if query_id > 0 {
         if err != nil {
           query_results = append(query_results, GetErrorQueryResult(query_id, err))
-          err = nil
+          conn.Close()
+          conn, err = OpenConnection()
         } else {
           query_results = append(query_results, GetEmptyQueryResult(query_id))
         }
@@ -274,6 +274,7 @@ func RunInstruction(query_sql_results []map[string]string) []string {
       SetTimerSeconds(change_timer_interval)
     }
 
+    conn.Close()
     return query_results
 }
 
